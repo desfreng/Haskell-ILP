@@ -10,7 +10,9 @@ pb = buildProblem $ do
 
   maximize $ x1 -. x2 +. x3
   suchThat $ 3 *. x1 -. 2 *. x2 +. 3 *. x3 ==. 3
-  suchThat $ 3 *. x3 <=. -1
+  suchThat $ 0 *. x1 ==. 3
+
+-- suchThat $ 3 *. x3 <=. -1
 
 main :: IO ()
 main = do

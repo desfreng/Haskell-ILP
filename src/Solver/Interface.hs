@@ -22,45 +22,31 @@ module Solver.Interface
   )
 where
 
-import Control.Monad.ST (runST)
 import Control.Monad.State
-import Data.Bifunctor
-import qualified Data.IntMap.Strict as IM
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.RatioInt (RatioInt)
-import Data.Vector.Strict (Vector)
-import qualified Data.Vector.Strict as V
-import qualified Data.Vector.Strict.Mutable as MV
+import qualified Data.Set as S
 import Solver.Data
 import Prelude hiding (EQ)
 
-data Var = Var
-  { vIdx :: !Int,
-    vTag :: !VarTag
-  }
+newtype Var = Var TableauCol
+  deriving (Eq, Ord)
 
-instance Eq Var where
-  (==) :: Var -> Var -> Bool
-  (Var i _) == (Var j _) = i == j
-
-instance Ord Var where
-  compare :: Var -> Var -> Ordering
-  compare (Var i _) (Var j _) = compare i j
-
-data Expr = Expr {coeffs :: !(Map Var RatioInt), constant :: !RatioInt}
+data Expr = Expr {coeffs :: !(Map TableauCol RatioInt), constant :: !RatioInt}
 
 data Constraint = LE !Expr | GE !Expr | EQ !Expr
 
 varExpr :: Var -> Expr
-varExpr v = Expr (M.singleton v 1) 0
+varExpr (Var v) = Expr (M.singleton v 1) 0
 
 addExpr :: Expr -> Expr -> Expr
 addExpr (Expr a c1) (Expr b c2) =
   Expr (M.unionWith (+) a b) (c1 + c2)
 
 scaleMap :: RatioInt -> Map a RatioInt -> Map a RatioInt
-scaleMap k = fmap (k *)
+scaleMap 0 _ = M.empty
+scaleMap k m = fmap (k *) m
 
 scaleExpr :: RatioInt -> Expr -> Expr
 scaleExpr k (Expr m c) =
@@ -105,22 +91,23 @@ a >=. b = GE (a -. b)
 (==.) :: (ToExpr a) => a -> RatioInt -> Constraint
 a ==. b = EQ (a -. b)
 
-data PBState = PBState
-  { nextVarId :: !Int,
-    pbVarKind :: !(Map Var VarType),
-    pbConstraints :: ![(Map Var RatioInt, RatioInt)],
-    pbObjective :: !(Expr, ObjectiveType)
-  }
-
-newtype BuildProblem a = BuildProblem (State PBState a)
+newtype BuildProblem a = BuildProblem (State Problem a)
   deriving (Functor, Applicative, Monad)
 
 addVar :: VarType -> VarTag -> BuildProblem Var
-addVar vKind vTag = BuildProblem $ do
-  st <- get
-  let v = Var (nextVarId st) vTag
-  put st {nextVarId = nextVarId st + 1, pbVarKind = M.insert v vKind (pbVarKind st)}
-  return v
+addVar vKind vTag = BuildProblem $ state pbAddVar
+  where
+    pbAddVar st@Problem {nbVars, intVars, varTags} =
+      let v = TableauCol nbVars
+          newS =
+            st
+              { nbVars = nbVars + 1,
+                varTags = M.insert v vTag varTags,
+                intVars = case vKind of
+                  IntegerVar -> S.insert v intVars
+                  RealVar -> intVars
+              }
+       in (Var v, newS)
 
 namedVar :: VarType -> String -> BuildProblem Var
 namedVar vKind = addVar vKind . Tagged
@@ -128,12 +115,12 @@ namedVar vKind = addVar vKind . Tagged
 freshVar :: VarType -> BuildProblem Var
 freshVar vKind = addVar vKind NoTag
 
-normExpr :: Map Var RatioInt -> RatioInt -> (Map Var RatioInt, RatioInt)
+normExpr :: Map a RatioInt -> RatioInt -> (Map a RatioInt, RatioInt)
 normExpr c k
   | k < 0 = (scaleMap (-1) c, -k)
   | otherwise = (c, k)
 
-toEqualZero :: Constraint -> BuildProblem (Map Var RatioInt, RatioInt)
+toEqualZero :: Constraint -> BuildProblem (Map TableauCol RatioInt, RatioInt)
 toEqualZero (EQ Expr {coeffs, constant}) = pure $ normExpr coeffs (-constant)
 toEqualZero (LE e) = do
   slack <- addVar RealVar SlackVar
@@ -147,12 +134,11 @@ toEqualZero (GE e) = do
 suchThat :: Constraint -> BuildProblem ()
 suchThat c = do
   cEqZ <- toEqualZero c
-  BuildProblem $ modify' (\st -> st {pbConstraints = cEqZ : pbConstraints st})
+  BuildProblem $ modify' (\st@Problem {constraints} -> st {constraints = cEqZ : constraints})
 
 setObjective :: ObjectiveType -> Expr -> BuildProblem ()
-setObjective t e = BuildProblem $ do
-  st <- get
-  put st {pbObjective = (e, t)}
+setObjective t e =
+  BuildProblem $ modify' (\st -> st {objective = coeffs e, objectiveType = t})
 
 maximize :: Expr -> BuildProblem ()
 maximize = setObjective Maximize
@@ -160,36 +146,16 @@ maximize = setObjective Maximize
 minimize :: Expr -> BuildProblem ()
 minimize = setObjective Minimize
 
-initialState :: PBState
-initialState =
-  PBState
-    { nextVarId = 0,
-      pbConstraints = [],
-      pbVarKind = mempty,
-      pbObjective = (toExpr (0 :: RatioInt), Minimize)
+initialProblem :: Problem
+initialProblem =
+  Problem
+    { nbVars = 0,
+      objectiveType = Minimize,
+      varTags = M.empty,
+      objective = M.empty,
+      constraints = [],
+      intVars = S.empty
     }
 
 buildProblem :: BuildProblem () -> Problem
-buildProblem (BuildProblem m) =
-  let vMap =
-        M.foldMapWithKey
-          ( \v kind ->
-              let vInfo = VarInfo (vTag v) kind . TableauCol $ vIdx v
-               in IM.singleton (vIdx v) vInfo
-          )
-          pbVarKind
-      ctrMap = fmap (first exprToVect) pbConstraints
-      objVect = exprToVect . coeffs $ fst pbObjective
-   in Problem vMap objVect ctrMap (snd pbObjective)
-  where
-    PBState {nextVarId, pbConstraints, pbVarKind, pbObjective} =
-      execState m initialState
-
-    exprToVect :: Map Var RatioInt -> Vector RatioInt
-    exprToVect vCoef = runST $
-      do
-        v <- MV.replicate nextVarId 0
-        () <-
-          mapM_ (\(var, val) -> MV.write v (vIdx var) val) $
-            M.toList vCoef
-        V.freeze v
+buildProblem (BuildProblem m) = execState m initialProblem

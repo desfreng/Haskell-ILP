@@ -2,6 +2,9 @@
 
 module Solver.Tableau (solveLinearProgram) where
 
+import Control.Monad.ST
+import qualified Data.Map as M
+import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
 import Data.Ord (Ordering (..), comparing)
 import Data.RatioInt (RatioInt (..))
@@ -75,7 +78,7 @@ fillObj t origCost s@SimplexTableau {tableau, basis} =
        in MV.write v i (orgCost - p)
 
 buildState :: Problem -> (SimplexTableau, SimplexData)
-buildState Problem {objective, constraints} =
+buildState Problem {nbVars, objective, constraints} =
   ( fillObj Minimize basePhase1Obj $
       SimplexTableau
         { tableau = fromRowList $ nilRow : constraintsRows,
@@ -84,11 +87,11 @@ buildState Problem {objective, constraints} =
     SimplexData
       { origVars,
         artifVars = S.fromAscList . V.toList $ artifVars,
-        origObj = objective
+        origObj = runST (do v <- MV.replicate numOrigVars 0; () <- flattenMap 0 v objective; V.freeze v)
       }
   )
   where
-    numOrigVars = length objective
+    numOrigVars = nbVars
     numArtifVars = length constraints
 
     origVars = V.generate numOrigVars TableauCol
@@ -98,13 +101,18 @@ buildState Problem {objective, constraints} =
     basePhase1Obj = V.replicate numOrigVars 0 <> V.replicate numArtifVars 1
 
     constraintsRows = zipWith buildConstraintRow [0 ..] constraints
-      where
-        identityRow :: Int -> Int -> Vector RatioInt
-        identityRow rowIndex total =
-          V.generate total (\i -> if i == rowIndex then 1 else 0)
 
-        buildConstraintRow :: Int -> (Vector RatioInt, RatioInt) -> Vector RatioInt
-        buildConstraintRow i (cstrCoef, cstrVal) = V.cons cstrVal cstrCoef <> identityRow i numArtifVars
+    buildConstraintRow :: Int -> (Map TableauCol RatioInt, RatioInt) -> Vector RatioInt
+    buildConstraintRow i (cstrCoef, cstrVal) = runST $
+      do
+        v <- MV.replicate (1 + numOrigVars + numArtifVars) 0
+        () <- MV.write v 0 cstrVal
+        () <- flattenMap 1 v cstrCoef
+        () <- MV.write v (1 + numOrigVars + i) 1
+        V.freeze v
+
+    flattenMap off row coefMap =
+      mapM_ (\(TableauCol var, val) -> MV.write row (off + var) val) $ M.toList coefMap
 
 {-# INLINE minIndexMayBy #-}
 minIndexMayBy :: (a -> Bool) -> ((Int, a) -> (Int, a) -> Ordering) -> Vector a -> Maybe Int
@@ -240,15 +248,15 @@ solveLinearProgram problem =
            in case solve phase2State of
                 Nothing -> Unbounded
                 Just solS ->
-                  let variablesValues = getVarRes solS <$> varInfo problem
+                  let variablesValues = getVarRes (intVars problem) solS <$> M.assocs (varTags problem)
                       optimalCost = extractObjective objType solS
                    in Optimal $ OptimalResult {variablesValues, optimalCost}
   where
-    getVarRes sol VarInfo {varTag, varIndex, varType} =
+    getVarRes intVars sol (varIndex, varTag) =
       let TableauCol x = varIndex
        in VariableResult
             { resIndex = x,
               resTag = varTag,
               resVal = extractVarValue sol varIndex,
-              resType = varType
+              resType = if varIndex `S.member` intVars then IntegerVar else RealVar
             }
