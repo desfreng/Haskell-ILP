@@ -5,18 +5,15 @@ import Solver.ILP
 pb :: Problem
 pb = buildProblem $ do
   x1 <- namedVar RealVar "x1"
-  x2 <- namedVar RealVar "x2"
-  x3 <- namedVar RealVar "x3"
+  x2 <- namedVar IntegerVar "x2"
 
-  maximize $ x1 -. x2 +. x3
-  suchThat $ 3 *. x1 -. 2 *. x2 +. 3 *. x3 ==. 3
-  suchThat $ 0 *. x1 ==. 3
-
--- suchThat $ 3 *. x3 <=. -1
+  maximize $ 2 *. x1 +. x2
+  suchThat $ 2 *. x1 +. x2 <=. 5
+  suchThat $ x1 +. 4 *. x2 >=. 2
 
 main :: IO ()
 main = do
   putStrLn ""
   print pb
-  let x = solveLinearProgram pb
+  let x = solveMILP pb
   print x

@@ -40,14 +40,14 @@ library
 
     -- Modules exported by the library.
     exposed-modules:
-        Solver.ILP
+        Solver.ILP, Solver.BranchAndBound
         
     -- Modules included in this library but not exported.
     other-modules:
         Solver.Matrix, Solver.Tableau, Solver.Interface, Solver.Data
 
     build-depends:
-        base ^>= 4.18.3.0,
+        base ^>= 4.21,
         vector,
         containers,
         ratio-int,
@@ -74,7 +74,7 @@ executable Haskell-ILP
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>= 4.18.3.0,
+        base ^>= 4.21,
         Haskell-ILP
 
     -- Directories containing source files.

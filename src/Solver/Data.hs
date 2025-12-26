@@ -10,8 +10,9 @@ import Data.RatioInt
 import Data.Set (Set)
 import Data.Vector.Strict (Vector)
 import Solver.Matrix
+import Text.Printf
 
-newtype TableauCol = TableauCol Int
+newtype VarID = VarID Int
   deriving (Eq, Ord)
 
 data VarType = IntegerVar | RealVar
@@ -23,25 +24,25 @@ data VarTag = NoTag | SlackVar | Tagged !String
 data Problem = Problem
   { nbVars :: Int,
     objectiveType :: ObjectiveType,
-    varTags :: Map TableauCol VarTag,
-    objective :: Map TableauCol RatioInt,
-    constraints :: [(Map TableauCol RatioInt, RatioInt)],
-    intVars :: Set TableauCol
+    varTags :: Map VarID VarTag,
+    objective :: Map VarID RatioInt,
+    constraints :: [(Map VarID RatioInt, RatioInt)],
+    intVars :: Set VarID
   }
 
 data SimplexTableau = SimplexTableau
   { tableau :: !(Matrix RatioInt),
-    basis :: !(Vector TableauCol)
+    basis :: !(Vector VarID)
   }
 
 data SimplexData = SimplexData
-  { artifVars :: !(Set TableauCol),
-    origVars :: !(Vector TableauCol),
+  { artifVars :: !(Set VarID),
+    origVars :: !(Vector VarID),
     origObj :: !(Vector RatioInt)
   }
 
 data VariableResult = VariableResult
-  { resIndex :: Int,
+  { resIndex :: VarID,
     resTag :: VarTag,
     resVal :: RatioInt,
     resType :: VarType
@@ -62,12 +63,12 @@ showRatio r
   | denominator r == 1 = show $ numerator r
   | otherwise = show (numerator r) <> "/" <> show (denominator r)
 
-showTag :: Int -> VarTag -> String
-showTag idx NoTag = "_" <> show idx
-showTag idx SlackVar = "_slack" <> show idx
+showTag :: VarID -> VarTag -> String
+showTag (VarID idx) NoTag = "_" <> show idx
+showTag (VarID idx) SlackVar = "_slack" <> show idx
 showTag _ (Tagged x) = x
 
-formatPoly :: Map TableauCol VarTag -> Map TableauCol RatioInt -> String
+formatPoly :: Map VarID VarTag -> Map VarID RatioInt -> String
 formatPoly vInfo l =
   let newL = map ppMult $ M.assocs l
    in case newL of
@@ -80,22 +81,23 @@ formatPoly vInfo l =
       | c >= 0 = ("+ ", showRatio c <> "×" <> ppVar v)
       | otherwise = ("", "- " <> showRatio (abs c) <> "×" <> ppVar v)
 
-    ppVar vCol@(TableauCol i) = showTag i $ vInfo M.! vCol
+    ppVar vCol = showTag vCol $ vInfo M.! vCol
 
-formatConstraint :: Map TableauCol VarTag -> (Map TableauCol RatioInt, RatioInt) -> String
+formatConstraint :: Map VarID VarTag -> (Map VarID RatioInt, RatioInt) -> String
 formatConstraint vInfo (coeffs, rhs) =
   let polyStr = formatPoly vInfo coeffs
    in "    " <> polyStr <> " = " <> showRatio rhs
 
 instance Show Problem where
   show :: Problem -> String
-  show Problem {objectiveType, varTags, objective, constraints} =
+  show Problem {objectiveType, varTags, objective, constraints, intVars} =
     let objTypeStr = case objectiveType of
           Minimize -> "min"
           Maximize -> "max"
         objStr = objTypeStr <> " " <> formatPoly varTags objective
         constraintsBlock = unlines $ formatConstraint varTags <$> constraints
-     in objStr <> "\n  with\n" <> constraintsBlock
+        intBlocks = unlines $ foldMap (\v -> ["    " <> showTag v (varTags M.! v) <> " integer"]) intVars
+     in printf "%s\n  with\n%s%s\n" objStr constraintsBlock intBlocks
 
 -- showTableau :: SimplexTableau -> String
 -- showTableau SimplexTableau {tableau, basis} =
@@ -106,7 +108,7 @@ instance Show Problem where
 --     nCol = ncols tableau
 --     nbVar = nCol - 1
 --     showVar = show
---     varLine = ("", "", showVar . TableauCol <$> [0 .. nbVar - 1])
+--     varLine = ("", "", showVar . VarID <$> [0 .. nbVar - 1])
 --     showRow i c = (c, showRatio $ getElem i 0 tableau, [showRatio $ getElem i j tableau | j <- [1 .. nCol - 1]])
 --     pad x y z =
 --       let widest =

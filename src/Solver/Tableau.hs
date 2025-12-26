@@ -5,7 +5,7 @@ module Solver.Tableau (solveLinearProgram) where
 import Control.Monad.ST
 import qualified Data.Map as M
 import Data.Map.Strict (Map)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (Ordering (..), comparing)
 import Data.RatioInt (RatioInt (..))
 import Data.Set (Set)
@@ -21,37 +21,37 @@ newtype TableauRow = TableauRow Int
   deriving (Eq, Show)
 
 {-# INLINE getVarValue #-}
-getVarValue :: Vector a -> TableauCol -> a
-getVarValue v (TableauCol i) = v V.! i
+getVarValue :: Vector a -> VarID -> a
+getVarValue v (VarID i) = v V.! i
 
 {-# INLINE tableValue #-}
-tableValue :: Vector a -> TableauCol -> a
-tableValue v (TableauCol i) = v V.! (i + 1)
+tableValue :: Vector a -> VarID -> a
+tableValue v (VarID i) = v V.! (i + 1)
 
 {-# INLINE fromIndex #-}
-fromIndex :: Int -> TableauCol
+fromIndex :: Int -> VarID
 fromIndex idx
   | idx == 0 = error "Invalid Index for a Column"
-  | otherwise = TableauCol (idx - 1)
+  | otherwise = VarID (idx - 1)
 
 {-# INLINE getTableCol #-}
-getTableCol :: Matrix a -> TableauCol -> Vector a
-getTableCol m (TableauCol x) = getCol (x + 1) m
+getTableCol :: Matrix a -> VarID -> Vector a
+getTableCol m (VarID x) = getCol (x + 1) m
 
 {-# INLINE getTableRow #-}
 getTableRow :: Matrix a -> TableauRow -> Vector a
 getTableRow m (TableauRow x) = getRow (x + 1) m
 
 {-# INLINE getTableElem #-}
-getTableElem :: Matrix a -> TableauRow -> TableauCol -> a
-getTableElem m (TableauRow i) (TableauCol j) = getElem (i + 1) (j + 1) m
+getTableElem :: Matrix a -> TableauRow -> VarID -> a
+getTableElem m (TableauRow i) (VarID j) = getElem (i + 1) (j + 1) m
 
 {-# INLINE isRow #-}
 isRow :: Int -> TableauRow -> Bool
 isRow x (TableauRow y) = x == y + 1
 
 {-# INLINE updateBasis #-}
-updateBasis :: Vector TableauCol -> TableauRow -> TableauCol -> Vector TableauCol
+updateBasis :: Vector VarID -> TableauRow -> VarID -> Vector VarID
 updateBasis basis (TableauRow i) v = V.modify (\mBasis -> MV.write mBasis i v) basis
 
 {-# INLINE removeTableRow #-}
@@ -94,15 +94,15 @@ buildState Problem {nbVars, objective, constraints} =
     numOrigVars = nbVars
     numArtifVars = length constraints
 
-    origVars = V.generate numOrigVars TableauCol
-    artifVars = V.generate numArtifVars $ TableauCol . (numOrigVars +)
+    origVars = V.generate numOrigVars VarID
+    artifVars = V.generate numArtifVars $ VarID . (numOrigVars +)
 
     nilRow = V.replicate (1 + numOrigVars + numArtifVars) 0
     basePhase1Obj = V.replicate numOrigVars 0 <> V.replicate numArtifVars 1
 
     constraintsRows = zipWith buildConstraintRow [0 ..] constraints
 
-    buildConstraintRow :: Int -> (Map TableauCol RatioInt, RatioInt) -> Vector RatioInt
+    buildConstraintRow :: Int -> (Map VarID RatioInt, RatioInt) -> Vector RatioInt
     buildConstraintRow i (cstrCoef, cstrVal) = runST $
       do
         v <- MV.replicate (1 + numOrigVars + numArtifVars) 0
@@ -112,7 +112,7 @@ buildState Problem {nbVars, objective, constraints} =
         V.freeze v
 
     flattenMap off row coefMap =
-      mapM_ (\(TableauCol var, val) -> MV.write row (off + var) val) $ M.toList coefMap
+      mapM_ (\(VarID var, val) -> MV.write row (off + var) val) $ M.toList coefMap
 
 {-# INLINE minIndexMayBy #-}
 minIndexMayBy :: (a -> Bool) -> ((Int, a) -> (Int, a) -> Ordering) -> Vector a -> Maybe Int
@@ -128,12 +128,12 @@ minIndexMayBy filterP cmpP = fmap fst . V.ifoldl' imin Nothing
             else acc
       | otherwise = acc
 
-findPivotCol :: SimplexTableau -> Maybe TableauCol
+findPivotCol :: SimplexTableau -> Maybe VarID
 findPivotCol SimplexTableau {tableau} =
   let objCoef = V.tail $ getRow 0 tableau
-   in TableauCol <$> minIndexMayBy (< 0) (comparing fst) objCoef
+   in VarID <$> minIndexMayBy (< 0) (comparing fst) objCoef
 
-findPivotRow :: SimplexTableau -> TableauCol -> Maybe TableauRow
+findPivotRow :: SimplexTableau -> VarID -> Maybe TableauRow
 findPivotRow SimplexTableau {tableau, basis} pivCol =
   let rhsVals = V.tail $ getCol 0 tableau
       pivColVals = V.tail $ getTableCol tableau pivCol
@@ -150,7 +150,7 @@ findPivotRow SimplexTableau {tableau, basis} pivCol =
               other -> other
    in TableauRow <$> minIndexMayBy blandFilter blandCmp (V.zip rhsVals pivColVals)
 
-performPivot :: Matrix RatioInt -> (TableauRow, TableauCol) -> Matrix RatioInt
+performPivot :: Matrix RatioInt -> (TableauRow, VarID) -> Matrix RatioInt
 performPivot t (pivRow, pivCol) =
   mapRow rowOp t
   where
@@ -163,7 +163,7 @@ performPivot t (pivRow, pivCol) =
               elmOp oldRow nPivRow = oldRow - factor * nPivRow
            in V.zipWith elmOp row normalizedPivRow
 
-pivot :: SimplexTableau -> (TableauRow, TableauCol) -> SimplexTableau
+pivot :: SimplexTableau -> (TableauRow, VarID) -> SimplexTableau
 pivot s@SimplexTableau {tableau, basis} (pivRow, pivCol) =
   let newBasis = updateBasis basis pivRow pivCol
       newTableau = performPivot tableau (pivRow, pivCol)
@@ -201,13 +201,13 @@ preparePhase2 objType d@SimplexData {artifVars, origVars, origObj} s@SimplexTabl
       let newState = removeVarRow rIdx origVars s
        in preparePhase2 objType d newState
 
-removeColumns :: Set TableauCol -> SimplexTableau -> SimplexTableau
+removeColumns :: Set VarID -> SimplexTableau -> SimplexTableau
 removeColumns artifVars s@SimplexTableau {tableau, basis} =
   s {tableau = filterCol filterP tableau, basis = basis}
   where
     filterP c = (c == 0) || not (S.member (fromIndex c) artifVars)
 
-removeVarRow :: TableauRow -> Vector TableauCol -> SimplexTableau -> SimplexTableau
+removeVarRow :: TableauRow -> Vector VarID -> SimplexTableau -> SimplexTableau
 removeVarRow vRow origVars s@SimplexTableau {tableau, basis} =
   case nonZeroCol of
     Nothing ->
@@ -225,7 +225,7 @@ removeVarRow vRow origVars s@SimplexTableau {tableau, basis} =
 scalProd :: (Num a) => Vector a -> Vector a -> a
 scalProd x y = V.sum (V.zipWith (*) x y)
 
-extractVarValue :: SimplexTableau -> TableauCol -> RatioInt
+extractVarValue :: SimplexTableau -> VarID -> RatioInt
 extractVarValue SimplexTableau {tableau, basis} v =
   case V.findIndex (== v) basis of
     Nothing -> 0
@@ -248,15 +248,16 @@ solveLinearProgram problem =
            in case solve phase2State of
                 Nothing -> Unbounded
                 Just solS ->
-                  let variablesValues = getVarRes (intVars problem) solS <$> M.assocs (varTags problem)
+                  let variablesValues = mapMaybe (getVarRes (intVars problem) solS) $ M.assocs (varTags problem)
                       optimalCost = extractObjective objType solS
                    in Optimal $ OptimalResult {variablesValues, optimalCost}
   where
+    getVarRes _ _ (_, SlackVar) = Nothing
     getVarRes intVars sol (varIndex, varTag) =
-      let TableauCol x = varIndex
-       in VariableResult
-            { resIndex = x,
-              resTag = varTag,
-              resVal = extractVarValue sol varIndex,
-              resType = if varIndex `S.member` intVars then IntegerVar else RealVar
-            }
+      Just
+        VariableResult
+          { resIndex = varIndex,
+            resTag = varTag,
+            resVal = extractVarValue sol varIndex,
+            resType = if varIndex `S.member` intVars then IntegerVar else RealVar
+          }

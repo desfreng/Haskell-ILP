@@ -3,7 +3,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
 module Solver.Interface
-  ( Var (),
+  ( Var (..),
     Expr (),
     Constraint (),
     BuildProblem (),
@@ -19,21 +19,22 @@ module Solver.Interface
     (>=.),
     (<=.),
     buildProblem,
+    changeProblem,
   )
 where
 
 import Control.Monad.State
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.RatioInt (RatioInt)
+import Data.RatioInt (RatioInt (..))
 import qualified Data.Set as S
 import Solver.Data
 import Prelude hiding (EQ)
 
-newtype Var = Var TableauCol
+newtype Var = Var VarID
   deriving (Eq, Ord)
 
-data Expr = Expr {coeffs :: !(Map TableauCol RatioInt), constant :: !RatioInt}
+data Expr = Expr {coeffs :: !(Map VarID RatioInt), constant :: !RatioInt}
 
 data Constraint = LE !Expr | GE !Expr | EQ !Expr
 
@@ -98,7 +99,7 @@ addVar :: VarType -> VarTag -> BuildProblem Var
 addVar vKind vTag = BuildProblem $ state pbAddVar
   where
     pbAddVar st@Problem {nbVars, intVars, varTags} =
-      let v = TableauCol nbVars
+      let v = VarID nbVars
           newS =
             st
               { nbVars = nbVars + 1,
@@ -120,7 +121,7 @@ normExpr c k
   | k < 0 = (scaleMap (-1) c, -k)
   | otherwise = (c, k)
 
-toEqualZero :: Constraint -> BuildProblem (Map TableauCol RatioInt, RatioInt)
+toEqualZero :: Constraint -> BuildProblem (Map VarID RatioInt, RatioInt)
 toEqualZero (EQ Expr {coeffs, constant}) = pure $ normExpr coeffs (-constant)
 toEqualZero (LE e) = do
   slack <- addVar RealVar SlackVar
@@ -159,3 +160,6 @@ initialProblem =
 
 buildProblem :: BuildProblem () -> Problem
 buildProblem (BuildProblem m) = execState m initialProblem
+
+changeProblem :: Problem -> BuildProblem () -> Problem
+changeProblem s (BuildProblem m) = execState m s
