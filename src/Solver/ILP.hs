@@ -7,7 +7,15 @@ module Solver.ILP
 where
 
 import Solver.BranchAndBound (solveMILP)
-import Solver.Data (Problem, VarID (), VarType (..))
+import Solver.Data
+  ( OptimalResult (..),
+    Problem,
+    Result (..),
+    VarID (),
+    VarTag (..),
+    VarType (..),
+    VariableResult (..),
+  )
 import Solver.Interface
   ( BuildProblem (),
     Constraint (),

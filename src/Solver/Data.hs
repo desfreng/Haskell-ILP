@@ -1,4 +1,3 @@
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
@@ -6,11 +5,11 @@ module Solver.Data where
 
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.RatioInt
+import Data.RatioInt (RatioInt (..))
 import Data.Set (Set)
 import Data.Vector.Strict (Vector)
-import Solver.Matrix
-import Text.Printf
+import Solver.Matrix (Matrix)
+import Text.Printf (printf)
 
 newtype VarID = VarID Int
   deriving (Eq, Ord)
