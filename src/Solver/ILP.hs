@@ -19,8 +19,9 @@ import Solver.Data
 import Solver.Interface
   ( BuildProblem (),
     Constraint (),
-    Expr (),
+    ILPExpr (),
     ObjectiveType (..),
+    ToILPExpr (toILPExpr),
     Var (),
     buildProblem,
     freshVar,

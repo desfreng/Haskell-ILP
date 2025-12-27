@@ -3,8 +3,9 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
 module Solver.Interface
-  ( Var (..),
-    Expr (),
+  ( ToILPExpr (toILPExpr),
+    Var (..),
+    ILPExpr (),
     Constraint (),
     BuildProblem (),
     ObjectiveType (..),
@@ -36,62 +37,62 @@ import Prelude hiding (EQ)
 newtype Var = Var VarID
   deriving (Eq, Ord)
 
-data Expr = Expr {coeffs :: !(Map VarID RatioInt), constant :: !RatioInt}
+data ILPExpr = ILPExpr {coeffs :: !(Map VarID RatioInt), constant :: !RatioInt}
 
-data Constraint = LE !Expr | GE !Expr | EQ !Expr
+data Constraint = LE !ILPExpr | GE !ILPExpr | EQ !ILPExpr
 
-varExpr :: Var -> Expr
-varExpr (Var v) = Expr (M.singleton v 1) 0
+varILPExpr :: Var -> ILPExpr
+varILPExpr (Var v) = ILPExpr (M.singleton v 1) 0
 
-addExpr :: Expr -> Expr -> Expr
-addExpr (Expr a c1) (Expr b c2) =
-  Expr (M.unionWith (+) a b) (c1 + c2)
+addILPExpr :: ILPExpr -> ILPExpr -> ILPExpr
+addILPExpr (ILPExpr a c1) (ILPExpr b c2) =
+  ILPExpr (M.unionWith (+) a b) (c1 + c2)
 
 scaleMap :: RatioInt -> Map a RatioInt -> Map a RatioInt
 scaleMap 0 _ = M.empty
 scaleMap k m = fmap (k *) m
 
-scaleExpr :: RatioInt -> Expr -> Expr
-scaleExpr k (Expr m c) =
-  Expr (scaleMap k m) (k * c)
+scaleILPExpr :: RatioInt -> ILPExpr -> ILPExpr
+scaleILPExpr k (ILPExpr m c) =
+  ILPExpr (scaleMap k m) (k * c)
 
-class ToExpr a where
-  toExpr :: a -> Expr
+class ToILPExpr a where
+  toILPExpr :: a -> ILPExpr
 
-instance ToExpr Expr where
-  toExpr :: Expr -> Expr
-  toExpr = id
+instance ToILPExpr ILPExpr where
+  toILPExpr :: ILPExpr -> ILPExpr
+  toILPExpr = id
 
-instance ToExpr Var where
-  toExpr :: Var -> Expr
-  toExpr = varExpr
+instance ToILPExpr Var where
+  toILPExpr :: Var -> ILPExpr
+  toILPExpr = varILPExpr
 
-instance ToExpr RatioInt where
-  toExpr :: RatioInt -> Expr
-  toExpr = Expr mempty
+instance ToILPExpr RatioInt where
+  toILPExpr :: RatioInt -> ILPExpr
+  toILPExpr = ILPExpr mempty
 
 infixl 6 +., -.
 
-(+.) :: (ToExpr a, ToExpr b) => a -> b -> Expr
-a +. b = addExpr (toExpr a) (toExpr b)
+(+.) :: (ToILPExpr a, ToILPExpr b) => a -> b -> ILPExpr
+a +. b = addILPExpr (toILPExpr a) (toILPExpr b)
 
-(-.) :: (ToExpr a, ToExpr b) => a -> b -> Expr
-a -. b = a +. scaleExpr (-1) (toExpr b)
+(-.) :: (ToILPExpr a, ToILPExpr b) => a -> b -> ILPExpr
+a -. b = a +. scaleILPExpr (-1) (toILPExpr b)
 
 infixl 7 *.
 
-(*.) :: (ToExpr a) => RatioInt -> a -> Expr
-k *. x = scaleExpr k (toExpr x)
+(*.) :: (ToILPExpr a) => RatioInt -> a -> ILPExpr
+k *. x = scaleILPExpr k (toILPExpr x)
 
 infix 4 <=., >=., ==.
 
-(<=.) :: (ToExpr a) => a -> RatioInt -> Constraint
+(<=.) :: (ToILPExpr a) => a -> RatioInt -> Constraint
 a <=. b = LE (a -. b)
 
-(>=.) :: (ToExpr a) => a -> RatioInt -> Constraint
+(>=.) :: (ToILPExpr a) => a -> RatioInt -> Constraint
 a >=. b = GE (a -. b)
 
-(==.) :: (ToExpr a) => a -> RatioInt -> Constraint
+(==.) :: (ToILPExpr a) => a -> RatioInt -> Constraint
 a ==. b = EQ (a -. b)
 
 newtype BuildProblem a = BuildProblem (State Problem a)
@@ -118,35 +119,35 @@ namedVar vKind = addVar vKind . Tagged
 freshVar :: VarType -> BuildProblem Var
 freshVar vKind = addVar vKind NoTag
 
-normExpr :: Map a RatioInt -> RatioInt -> (Map a RatioInt, RatioInt)
-normExpr c k
+normILPExpr :: Map a RatioInt -> RatioInt -> (Map a RatioInt, RatioInt)
+normILPExpr c k
   | k < 0 = (scaleMap (-1) c, -k)
   | otherwise = (c, k)
 
 toEqualZero :: Constraint -> BuildProblem (Map VarID RatioInt, RatioInt)
-toEqualZero (EQ Expr {coeffs, constant}) = pure $ normExpr coeffs (-constant)
+toEqualZero (EQ ILPExpr {coeffs, constant}) = pure $ normILPExpr coeffs (-constant)
 toEqualZero (LE e) = do
   slack <- addVar RealVar SlackVar
-  let Expr {coeffs, constant} = e +. slack
-  return $ normExpr coeffs (-constant)
+  let ILPExpr {coeffs, constant} = e +. slack
+  return $ normILPExpr coeffs (-constant)
 toEqualZero (GE e) = do
   slack <- addVar RealVar SlackVar
-  let Expr {coeffs, constant} = e -. slack
-  return $ normExpr coeffs (-constant)
+  let ILPExpr {coeffs, constant} = e -. slack
+  return $ normILPExpr coeffs (-constant)
 
 suchThat :: Constraint -> BuildProblem ()
 suchThat c = do
   cEqZ <- toEqualZero c
   BuildProblem $ modify' (\st@Problem {constraints} -> st {constraints = cEqZ : constraints})
 
-setObjective :: ObjectiveType -> Expr -> BuildProblem ()
+setObjective :: ObjectiveType -> ILPExpr -> BuildProblem ()
 setObjective t e =
   BuildProblem $ modify' (\st -> st {objective = coeffs e, objectiveType = t})
 
-maximize :: Expr -> BuildProblem ()
+maximize :: ILPExpr -> BuildProblem ()
 maximize = setObjective Maximize
 
-minimize :: Expr -> BuildProblem ()
+minimize :: ILPExpr -> BuildProblem ()
 minimize = setObjective Minimize
 
 initialProblem :: Problem
