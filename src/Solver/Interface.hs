@@ -39,6 +39,29 @@ newtype Var = Var VarID
 
 data ILPExpr = ILPExpr {coeffs :: !(Map VarID RatioInt), constant :: !RatioInt}
 
+class ToILPExpr a where
+  toILPExpr :: a -> ILPExpr
+
+instance ToILPExpr ILPExpr where
+  toILPExpr :: ILPExpr -> ILPExpr
+  toILPExpr = id
+
+instance ToILPExpr Var where
+  toILPExpr :: Var -> ILPExpr
+  toILPExpr = varILPExpr
+
+instance ToILPExpr RatioInt where
+  toILPExpr :: RatioInt -> ILPExpr
+  toILPExpr = ILPExpr mempty
+
+instance Semigroup ILPExpr where
+  (<>) :: ILPExpr -> ILPExpr -> ILPExpr
+  e1 <> e2 = e1 +. e2
+
+instance Monoid ILPExpr where
+  mempty :: ILPExpr
+  mempty = toILPExpr (0 :: RatioInt)
+
 data Constraint = LE !ILPExpr | GE !ILPExpr | EQ !ILPExpr
 
 varILPExpr :: Var -> ILPExpr
@@ -55,21 +78,6 @@ scaleMap k m = fmap (k *) m
 scaleILPExpr :: RatioInt -> ILPExpr -> ILPExpr
 scaleILPExpr k (ILPExpr m c) =
   ILPExpr (scaleMap k m) (k * c)
-
-class ToILPExpr a where
-  toILPExpr :: a -> ILPExpr
-
-instance ToILPExpr ILPExpr where
-  toILPExpr :: ILPExpr -> ILPExpr
-  toILPExpr = id
-
-instance ToILPExpr Var where
-  toILPExpr :: Var -> ILPExpr
-  toILPExpr = varILPExpr
-
-instance ToILPExpr RatioInt where
-  toILPExpr :: RatioInt -> ILPExpr
-  toILPExpr = ILPExpr mempty
 
 infixl 6 +., -.
 
