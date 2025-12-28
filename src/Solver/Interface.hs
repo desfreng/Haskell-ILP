@@ -150,7 +150,7 @@ suchThat c = do
 
 setObjective :: ObjectiveType -> ILPExpr -> BuildProblem ()
 setObjective t e =
-  BuildProblem $ modify' (\st -> st {objective = coeffs e, objectiveType = t})
+  BuildProblem $ modify' (\st -> st {objective = (coeffs e, constant e), objectiveType = t})
 
 maximize :: ILPExpr -> BuildProblem ()
 maximize = setObjective Maximize
@@ -164,7 +164,7 @@ initialProblem =
     { nbVars = 0,
       objectiveType = Minimize,
       varTags = M.empty,
-      objective = M.empty,
+      objective = (M.empty, 0),
       constraints = [],
       intVars = S.empty
     }

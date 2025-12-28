@@ -87,7 +87,7 @@ buildState Problem {nbVars, objective, constraints} =
     SimplexData
       { origVars,
         artifVars = S.fromAscList . V.toList $ artifVars,
-        origObj = runST (do v <- MV.replicate numOrigVars 0; () <- flattenMap 0 v objective; V.freeze v)
+        origObj = runST (do v <- MV.replicate numOrigVars 0; () <- flattenMap 0 v (fst objective); V.freeze v)
       }
   )
   where
@@ -249,7 +249,7 @@ solveLinearProgram problem =
                 Nothing -> Unbounded
                 Just solS ->
                   let variablesValues = mapMaybe (getVarRes (intVars problem) solS) $ M.assocs (varTags problem)
-                      optimalCost = extractObjective objType solS
+                      optimalCost = extractObjective objType solS + snd (objective problem)
                    in Optimal $ OptimalResult {variablesValues, optimalCost}
   where
     getVarRes _ _ (_, SlackVar) = Nothing

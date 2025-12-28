@@ -24,7 +24,7 @@ data Problem = Problem
   { nbVars :: Int,
     objectiveType :: ObjectiveType,
     varTags :: Map VarID VarTag,
-    objective :: Map VarID RatioInt,
+    objective :: (Map VarID RatioInt, RatioInt),
     constraints :: [(Map VarID RatioInt, RatioInt)],
     intVars :: Set VarID
   }
@@ -93,7 +93,13 @@ instance Show Problem where
     let objTypeStr = case objectiveType of
           Minimize -> "min"
           Maximize -> "max"
-        objStr = objTypeStr <> " " <> formatPoly varTags objective
+        objStr =
+          objTypeStr
+            <> " "
+            <> formatPoly varTags (fst objective)
+            <> if snd objective /= 0
+              then " + " <> showRatio (snd objective)
+              else mempty
         constraintsBlock = unlines $ formatConstraint varTags <$> constraints
         intBlocks = unlines $ foldMap (\v -> ["    " <> showTag v (varTags M.! v) <> " integer"]) intVars
      in printf "%s\n  with\n%s%s\n" objStr constraintsBlock intBlocks
